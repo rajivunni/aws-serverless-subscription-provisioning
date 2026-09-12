@@ -1,0 +1,24 @@
+{
+  "id": 1001,
+  "order_placed": "2026-01-01T12:00:00Z",
+  "cancellation_scheduled_for": "",
+  "email": "subscriber@example.invalid",
+  "order_id": "DEMO-ORDER-1001",
+  "customer_id": "DEMO-CUSTOMER-1001",
+  "status": "ACTIVE",
+  "log": [],
+  "items": [
+    {
+      "id": 1,
+      "product_id": "DEMO-PRODUCT-1",
+      "properties": [
+        {
+          "key": "Mobile Number",
+          "value": "+12025550123"
+        }
+      ]
+    }
+  ],
+  "first_name": "Demo",
+  "last_name": "Subscriber"
+}
