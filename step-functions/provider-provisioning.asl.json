@@ -1,0 +1,14 @@
+{
+  "Comment": "SIM provider provisioning workflow",
+  "StartAt": "Provision",
+  "States": {
+    "Provision": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ProvisioningFunctionArn}"
+      },
+      "End": true
+    }
+  }
+}

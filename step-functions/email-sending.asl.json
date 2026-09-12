@@ -1,0 +1,35 @@
+{
+  "Comment": "Email sending state machine",
+  "StartAt": "SendEmail",
+  "States": {
+    "SendEmail": {
+      "Type": "Task",
+      "Resource": "${EmailSenderFunctionArn}",
+      "End": true,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed",
+            "States.Timeout"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "EmailFailed"
+        }
+      ]
+    },
+    "EmailFailed": {
+      "Type": "Fail",
+      "Error": "EmailSendingFailed",
+      "Cause": "Failed to send email after retries"
+    }
+  }
+}
