@@ -1,0 +1,311 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Anonymized subscription provisioning reference; not validated for deployment.
+
+Transform:
+  - AWS::Serverless-2016-10-31
+
+Mappings:
+  AppConfig:
+    Fn::Transform:
+      Name: AWS::Include
+      Parameters:
+        Location: mappings.yaml
+
+Globals:
+  Function:
+    Timeout: 10
+    Architectures:
+      - arm64
+    Runtime: provided.al2
+    MemorySize: 128
+
+Resources:
+  WebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: platform-webhook-function
+      Handler: src/cmd/webhook
+      Description: Receives subscription webhooks and records work; see documented deduplication limitations.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebhookEventsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WorkflowItemsTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - SecretsManager:DescribeSecret
+              - SecretsManager:GetSecretValue
+            Resource: !FindInMap [ AppConfig, default, SubscriptionApiSecretArn ]
+        - StepFunctionsExecutionPolicy:
+            StateMachineName: !GetAtt ProvisioningStateMachine.Name
+      Environment:
+        Variables:
+          WEBHOOK_EVENTS_TABLE: !Ref WebhookEventsTable
+          WORKFLOW_ITEMS_TABLE: !Ref WorkflowItemsTable
+          SUBSCRIPTION_API_SECRET_ARN: !FindInMap [ AppConfig, default, SubscriptionApiSecretArn ]
+          PROVISIONING_STATE_MACHINE_ARN: !Ref ProvisioningStateMachine
+          PROVIDER_TARIFF_ID: !FindInMap [ AppConfig, default, ProviderTariffId ]
+          PROVIDER_BOLTON_ID: !FindInMap [ AppConfig, default, ProviderBoltOnId ]
+      Events:
+        SubCreated:
+          Type: Api
+          Properties:
+            Path: /subscriptions/webhook/created
+            Method: POST
+        SubCancelled:
+          Type: Api
+          Properties:
+            Path: /subscriptions/webhook/cancelled
+            Method: POST
+    Metadata:
+      BuildMethod: makefile
+
+  ProvisionerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: provider-provisioner-function
+      Handler: src/cmd/provisioner
+      Description: Processes workflow items and performs provisioning/unprovisioning with Provider.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UnProvisioningResultsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProvisioningResultsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WorkflowItemsTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - SecretsManager:DescribeSecret
+              - SecretsManager:GetSecretValue
+            Resource:
+              - !FindInMap [ AppConfig, default, ProviderSecretArn ]
+              - !FindInMap [ AppConfig, default, ProviderClientIdArn ]
+      Environment:
+        Variables:
+          WORKFLOW_ITEMS_TABLE: !Ref WorkflowItemsTable
+          PROVISIONING_REQUESTS_TABLE: !Ref ProvisioningResultsTable
+          UNPROVISIONING_REQUESTS_TABLE: !Ref UnProvisioningResultsTable
+          PROVIDER_AUTH_URL: !FindInMap [ AppConfig, default, ProviderAuthUrl ]
+          PROVIDER_API_URL: !FindInMap [ AppConfig, default, ProviderApiUrl ]
+          PROVIDER_ACCOUNT_ID: !FindInMap [ AppConfig, default, ProviderAccountId ]
+          PROVIDER_COMPANY_ID: !FindInMap [ AppConfig, default, ProviderCompanyId ]
+          PROVIDER_API_CLIENT_SECRET_ARN: !FindInMap [ AppConfig, default, ProviderSecretArn ]
+          PROVIDER_API_CLIENT_ID_ARN: !FindInMap [ AppConfig, default, ProviderClientIdArn ]
+          PROVIDER_HOLDING_TARIFF_ID: !FindInMap [ AppConfig, default, ProviderHoldingTariffId ]
+          PROVIDER_PROVISIONING_ORDER_ID: !FindInMap [ AppConfig, default, ProviderProvisioningOrderId ]
+    Metadata:
+      BuildMethod: makefile
+
+  ProviderWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: provider-webhook-function
+      Handler: src/cmd/provider-webhook
+      Description: Receives Provider submission webhooks and queues email commands.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProvisioningResultsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UnProvisioningResultsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EmailCommandsTable
+        - StepFunctionsExecutionPolicy:
+            StateMachineName: !GetAtt EmailSendingStateMachine.Name
+        - Statement:
+            Effect: Allow
+            Action:
+              - SecretsManager:DescribeSecret
+              - SecretsManager:GetSecretValue
+            Resource:
+              - !FindInMap [ AppConfig, default, ProviderWebhookAuthSecretArn ]
+      Environment:
+        Variables:
+          PROVISIONING_REQUESTS_TABLE: !Ref ProvisioningResultsTable
+          UNPROVISIONING_REQUESTS_TABLE: !Ref UnProvisioningResultsTable
+          EMAIL_COMMANDS_TABLE: !Ref EmailCommandsTable
+          EMAIL_STATE_MACHINE_ARN: !Ref EmailSendingStateMachine
+          PROVIDER_WEBHOOK_AUTH_HEADER_NAME: !FindInMap [ AppConfig, default, ProviderWebhookAuthHeaderName ]
+          PROVIDER_WEBHOOK_AUTH_SECRET_ARN: !FindInMap [ AppConfig, default, ProviderWebhookAuthSecretArn ]
+      Events:
+        ProviderWebhook:
+          Type: Api
+          Properties:
+            Path: /provider/webhook/submission
+            Method: POST
+    Metadata:
+      BuildMethod: makefile
+
+  EmailSenderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: email-sender-function
+      Handler: src/cmd/email-sender
+      Description: Sends emails based on email commands.
+      Timeout: 90
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EmailCommandsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProvisioningResultsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UnProvisioningResultsTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - SecretsManager:DescribeSecret
+              - SecretsManager:GetSecretValue
+            Resource:
+              - !FindInMap [ AppConfig, default, EmailApiKeyArn ]
+      Environment:
+        Variables:
+          EMAIL_COMMANDS_TABLE: !Ref EmailCommandsTable
+          FROM_ADDRESS: !FindInMap [ AppConfig, default, FromAddress ]
+          FROM_NAME: !FindInMap [ AppConfig, default, FromName ]
+          EMAIL_API_KEY_ARN: !FindInMap [ AppConfig, default, EmailApiKeyArn ]
+    Metadata:
+      BuildMethod: makefile
+
+  WebhookEventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: platform-webhook-events
+      AttributeDefinitions:
+        - AttributeName: eventId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: eventId
+          KeyType: HASH
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 2
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+
+  ProvisioningResultsTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: provider-provisioning-requests
+      PrimaryKey:
+        Name: ticketNumber
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 2
+
+  UnProvisioningResultsTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: provider-unprovisioning-requests
+      PrimaryKey:
+        Name: ticketNumber
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 2
+
+  WorkflowItemsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: provider-workflow-items
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: N
+        - AttributeName: state
+          AttributeType: S
+      GlobalSecondaryIndexes:
+        - IndexName: state-index
+          KeySchema:
+            - AttributeName: state
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+          ProvisionedThroughput:
+            ReadCapacityUnits: 2
+            WriteCapacityUnits: 2
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 2
+
+  EmailCommandsTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: email-commands
+      PrimaryKey:
+        Name: id
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 2
+
+  ProvisioningStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: provider-provisioning-state-machine
+      DefinitionUri: step-functions/provider-provisioning.asl.json
+      DefinitionSubstitutions:
+        ProvisioningFunctionArn: !GetAtt ProvisionerFunction.Arn
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ProvisionerFunction
+
+  ProvisioningSchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: start-provisioning-state-machine
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !Ref ProvisioningStateMachine
+
+  ProvisioningStateMachineScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: provider-provisioning-schedule-rule
+      Description: Periodically trigger the provisioning state machine to process due workflow items.
+      ScheduleExpression: rate(15 minutes)
+      State: DISABLED
+      Targets:
+        - Arn: !Ref ProvisioningStateMachine
+          Id: provisioning-state-machine
+          RoleArn: !GetAtt ProvisioningSchedulerRole.Arn
+          Input: "{}"
+
+  EmailSendingStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: email-sending-state-machine
+      DefinitionUri: step-functions/email-sending.asl.json
+      DefinitionSubstitutions:
+        EmailSenderFunctionArn: !GetAtt EmailSenderFunction.Arn
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref EmailSenderFunction
+Outputs:
+  WebhookEndpoint:
+    Description: "API Gateway endpoint URL for Prod stage"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/"

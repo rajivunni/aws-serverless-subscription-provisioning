@@ -1,0 +1,19 @@
+# Synthetic placeholders only. This file cannot be deployed as-is.
+# Do not commit the populated mappings.yaml or any credential values.
+default:
+  SubscriptionApiSecretArn: "arn:aws:secretsmanager:eu-west-2:000000000000:secret:example-subscription-hmac"
+  ProviderAccountId: "YOUR_PROVIDER_ACCOUNT_ID"
+  ProviderCompanyId: "YOUR_PROVIDER_COMPANY_ID"
+  ProviderSecretArn: "arn:aws:secretsmanager:eu-west-2:000000000000:secret:example-provider-secret"
+  ProviderClientIdArn: "arn:aws:secretsmanager:eu-west-2:000000000000:secret:example-provider-client-id"
+  ProviderApiUrl: "https://api.provider.example.invalid"
+  ProviderAuthUrl: "https://auth.provider.example.invalid/token"
+  ProviderTariffId: "YOUR_PROVIDER_TARIFF_ID"
+  ProviderHoldingTariffId: "YOUR_PROVIDER_HOLDING_TARIFF_ID"
+  ProviderProvisioningOrderId: "YOUR_PROVIDER_PROVISIONING_ORDER_ID"
+  ProviderBoltOnId: ""
+  FromAddress: "sender@example.invalid"
+  FromName: "Example Subscription Service"
+  ProviderWebhookAuthHeaderName: "X-Provider-Auth"
+  ProviderWebhookAuthSecretArn: "arn:aws:secretsmanager:eu-west-2:000000000000:secret:example-webhook-auth"
+  EmailApiKeyArn: "arn:aws:secretsmanager:eu-west-2:000000000000:secret:example-email-api-key"
